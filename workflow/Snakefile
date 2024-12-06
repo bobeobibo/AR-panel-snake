@@ -19,13 +19,13 @@ want_all.append(expand(base + "AR/{sample}.bam.bai", sample=ids))
 want_all.append(expand(base + "AR/{sample}.bam.stat", sample=ids))
 want_all.append(expand(base + "AR/{sample}.RPKM", sample=ids))
 want_all.append(base + "results/All.RPKM")
-want_all.append(expand(base + "AR/{sample}.bgcov", sample=ids))
-want_all.append(expand(base + "AR/99_filt/{sample}.bgcov.wid.meg99", sample=ids))
-want_all.append(expand(base + "AR/99_filt/{sample}.bgcov.wid.gene99", sample=ids))
-want_all.append(expand(base + "AR/99_filt/{sample}.bgcov.wid.gene99.adiv", sample=ids))
-want_all.append(base + "results/All.adiv")
-want_all.append(base + "results/All.ARsample_counts")
-
+want_all.append(expand(base + "AR_red/{sample}.bgcov", sample=ids))
+want_all.append(expand(base + "AR_red/{sample}.bgcov.wid", sample=ids))
+want_all.append(expand(base + "AR_red/99_filt/{sample}.bgcov.wid.meg99", sample=ids))
+want_all.append(expand(base + "AR_red/99_filt/{sample}.bgcov.wid.gene99", sample=ids))
+want_all.append(expand(base + "AR_red/99_filt/{sample}.bgcov.wid.gene99", sample=ids))
+want_all.append(expand(base + "AR_red/99_filt/{sample}.bgcov.wid.gene99.adiv", sample=ids))
+want_all.append(base + "results/All_red.adiv")
 
 rule all:
     input:
@@ -155,80 +155,79 @@ rule rpkm_all:
         base + "results/All.RPKM",
     shell:
         "cat {input} > {output}"
-# get info on how many nucleotides are covered for each gene
-rule bgcov:
+
+#rule to count AR gene richness properly
+rule map_AR_red:
     input:
-        base + "AR/{sample}.bam",
+        r1=base0 + "{sample}_R1.fastq.gz",
+        r2=base0 + "{sample}_R2.fastq.gz",
+    params:
+        db=config["AR"]
     output:
-        base + "AR/{sample}.bgcov",
-    conda:
-        "envs/arsnake.yml"
+        temp(base + "AR_red/{sample}.bam"),
+    log:
+        base + "logs/AR_red/{sample}.mapAR.log",
+    shell:
+        "bowtie2 -x {params.db} -1 {input.r1} -2 {input.r2} -a 2> {log} | samtools view -b -q 30 | samtools sort -o {output}"
+
+# get info on how many nucleotides are covered for each gene
+rule bgcov_red:
+    input:
+        base + "AR_red/{sample}.bam",
+    output:
+        temp(base + "AR_red/{sample}.bgcov"),
     log:
         #in case something goes wrong
-        base + "logs/wid/{sample}.bgcov.ERRlog",
+        base + "logs/wid_red/{sample}.bgcov.ERRlog",
     shell:
         "bedtools genomecov -ibam {input} > {output} 2> {log}"
 
-
 # get % of covered bases for each gene variant
-rule wid:
+rule wid_red:
     input:
-        base + "AR/{sample}.bgcov",
+        base + "AR_red/{sample}.bgcov",
     output:
-        base + "AR/{sample}.bgcov.wid",
+        base + "AR_red/{sample}.bgcov.wid",
     log:
         #in case something goes wrong
-        base + "logs/wid/{sample}.wid.ERRlog",
+        base + "logs/wid_red/{sample}.wid.ERRlog",
     shell:
         "python3 scripts/genomecov_to_wid.py {input} > {output} 2> {log}"
 
-
 # get only sequences that are covered by 99% of their length
-rule filter_99meg:
+rule filter_99meg_red:
     input:
-        base + "AR/{sample}.bgcov.wid",
+        base + "AR_red/{sample}.bgcov.wid",
     output:
-        base + "AR/99_filt/{sample}.bgcov.wid.meg99",
+        base + "AR_red/99_filt/{sample}.bgcov.wid.meg99",
     shell:
         "cat {input} | awk '{{if ($2 > 98) print}}' > {output}"
 
-
 # get only genes that have at least one gene variant covered by 99% of its length
-rule filter_99gene:
+rule filter_99gene_red:
     input:
-        base + "AR/99_filt/{sample}.bgcov.wid.meg99",
+        base + "AR_red/99_filt/{sample}.bgcov.wid.meg99",
     output:
-        base + "AR/99_filt/{sample}.bgcov.wid.gene99",
+        base + "AR_red/99_filt/{sample}.bgcov.wid.gene99",
     shell:
         """cat {input} | awk '{{split($1,a,"|") ; print a[5]}}' | sort -u > {output}"""
 
-
 # get resistome alpha diversity as a number of genes that have al least
 # one gene variant covered by 99% of its length
-rule adiv_99:
+rule adiv_99_red:
     input:
-        base + "AR/99_filt/{sample}.bgcov.wid.gene99",
+        base + "AR_red/99_filt/{sample}.bgcov.wid.gene99",
     output:
-        base + "AR/99_filt/{sample}.bgcov.wid.gene99.adiv",
+        base + "AR_red/99_filt/{sample}.bgcov.wid.gene99.adiv",
     shell:
         "s=$(cat {input} | wc -l); echo $s {wildcards.sample} > {output}"
+
 # get table with a-diversity values for all samples
-rule adiv_all:
+rule adiv_all_red:
     input:
-        expand(base + "AR/99_filt/{sample}.bgcov.wid.gene99.adiv", sample=ids),
+        expand(base + "AR_red/99_filt/{sample}.bgcov.wid.gene99.adiv", sample=ids),
     output:
-        base + "results/All.adiv",
+        base + "results/All_red.adiv",
     shell:
         "cat {input} > {output}"
 
-
-# get table with sample counts for each fully covered gene
-# (needed for identifying "core" genes)
-# NOTE: this file comes empty in test data
-rule forcore:
-    input:
-        expand(base + "AR/99_filt/{sample}.bgcov.wid.gene99", sample=ids),
-    output:
-        base + "results/All.ARsample_counts",
-    shell:
-        "cat {input} | sort | uniq -c | sort -nk1 > {output}"
